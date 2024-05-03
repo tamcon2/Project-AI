@@ -1,0 +1,244 @@
+#account
+class Account(object):
+    def __init__(self, first, last, id, balance):
+        self.first = first
+        self.last = last
+        self.id = id
+        self.balance = balance
+
+    def info(self):
+        return (self.first, self.last, self.id, self.balance)
+
+    def __eq__(self, other):
+        return self.info() == other.info()
+
+    def __hash__(self):
+        return hash((type(self), self.info()))
+
+    def __str__(self):
+        return "Account: %s %s, id %d, balance %d" % self.info()
+
+    __repr__ = __str__
+
+
+#commutative
+from kanren import run, var, fact
+from kanren.assoccomm import eq_assoccomm as eq
+from kanren.assoccomm import commutative, associative
+
+# Define some dummy Operationss
+add = 'add'
+mul = 'mul'
+# Declare that these ops are commutative using the facts system
+fact(commutative, mul)
+fact(commutative, add)
+fact(associative, mul)
+fact(associative, add)
+
+# Define some wild variables
+x, y = var('x'), var('y')
+
+# Two expressions to match
+pattern = (mul, (add, 1, x), y)                # (1 + x) * y
+expr    = (mul, 2, (add, 3, 1))                # 2 * (3 + 1)
+print(run(0, (x,y), eq(pattern, expr)))        # prints ((3, 2),) meaning
+                                               #   x matches to 3
+                                               #   y matches to 2
+
+#corleone
+# Family relationships from The Godfather
+# Translated from the core.logic example found in
+# "The Magical Island of Kanren - core.logic Intro Part 1"
+# http://objectcommando.com/blog/2011/11/04/the-magical-island-of-kanren-core-logic-intro-part-1/
+
+from kanren import Relation, facts, run, conde, var, eq
+
+father = Relation()
+mother = Relation()
+
+facts(father, ('Vito', 'Michael'),
+              ('Vito', 'Sonny'),
+              ('Vito', 'Fredo'),
+              ('Michael', 'Anthony'),
+              ('Michael', 'Mary'),
+              ('Sonny', 'Vicent'),
+              ('Sonny', 'Francesca'),
+              ('Sonny', 'Kathryn'),
+              ('Sonny', 'Frank'),
+              ('Sonny', 'Santino'))
+
+facts(mother, ('Carmela', 'Michael'),
+              ('Carmela', 'Sonny'),
+              ('Carmela', 'Fredo'),
+              ('Kay', 'Mary'),
+              ('Kay', 'Anthony'),
+              ('Sandra', 'Francesca'),
+              ('Sandra', 'Kathryn'),
+              ('Sandra', 'Frank'),
+              ('Sandra', 'Santino'))
+
+q = var()
+
+print((run(0, q, father('Vito', q))))          # Vito is the father of who?
+# ('Sonny', 'Michael', 'Fredo')
+
+
+print((run(0, q, father(q, 'Michael'))))       # Who is the father of Michael?
+# ('Vito',)
+
+def parent(p, child):
+    return conde([father(p, child)], [mother(p, child)])
+
+
+print((run(0, q, parent(q, 'Michael'))))       # Who is a parent of Michael?
+# ('Vito', 'Carmela')
+
+def grandparent(gparent, child):
+    p = var()
+    return conde((parent(gparent, p), parent(p, child)))
+
+
+print((run(0, q, grandparent(q, 'Anthony'))))  # Who is a grandparent of Anthony?
+# ('Vito', 'Carmela')
+
+
+print((run(0, q, grandparent('Vito', q))))     # Vito is a grandparent of whom?
+# ('Vicent', 'Anthony', 'Kathryn', 'Mary', 'Frank', 'Santino', 'Francesca')
+
+def sibling(a, b):
+    p = var()
+    return conde((parent(p, a), parent(p, b)))
+
+# All spouses
+x, y, z = var(), var(), var()
+print((run(0, (x, y), (father, x, z), (mother, y, z))))
+# (('Vito', 'Carmela'), ('Sonny', 'Sandra'), ('Michael', 'Kay'))
+
+#prime 
+""" Example using SymPy to construct a prime number goal """
+import itertools as it
+
+import pytest
+
+from unification import isvar
+
+from kanren import membero
+from kanren.core import (success, fail, var, run,
+                         condeseq, eq)
+try:
+    import sympy.ntheory.generate as sg
+except ImportError:
+    sg = None
+
+
+def primo(x):
+    """ x is a prime number """
+    if isvar(x):
+        return condeseq([(eq, x, p)] for p in map(sg.prime, it.count(1)))
+    else:
+        return success if sg.isprime(x) else fail
+
+
+def test_primo():
+    if not sg:
+        pytest.skip("Test missing required library: sympy.ntheory.generate")
+
+    x = var()
+    res = (set(run(0, x, (membero, x, (20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+                                       30)), (primo, x))))
+
+    assert {23, 29} == res
+
+    assert ((run(5, x, primo(x)))) == (2, 3, 5, 7, 11)
+
+#states
+"""
+An example showing how to use facts and relations to store data and query data
+
+This example builds a small database of the US states.
+
+The `adjacency` relation expresses which states border each other
+The `coastal` relation expresses which states border the ocean
+"""
+from kanren import run, fact, eq, Relation, var
+
+adjacent = Relation()
+coastal  = Relation()
+
+
+coastal_states = 'WA,OR,CA,TX,LA,MS,AL,GA,FL,SC,NC,VA,MD,DE,NJ,NY,CT,RI,MA,ME,NH,AK,HI'.split(',')
+
+for state in coastal_states:        # ['NY', 'NJ', 'CT', ...]
+    fact(coastal, state)            # e.g. 'NY' is coastal
+
+with open('examples/data/adjacent-states.txt') as f: # lines like 'CA,OR,NV,AZ'
+    adjlist = [line.strip().split(',') for line in f
+                                       if line and line[0].isalpha()]
+
+for L in adjlist:                   # ['CA', 'OR', 'NV', 'AZ']
+    head, tail = L[0], L[1:]        # 'CA', ['OR', 'NV', 'AZ']
+    for state in tail:
+        fact(adjacent, head, state) # e.g. 'CA' is adjacent to 'OR',
+                                    #      'CA' is adjacent to 'NV', etc...
+
+x = var()
+y = var()
+
+print((run(0, x, adjacent('CA', 'NY')))) # is California adjacent to New York?
+# ()
+
+print((run(0, x, adjacent('CA', x))))    # all states next to California
+# ('OR', 'NV', 'AZ')
+
+print((run(0, x, adjacent('TX', x),    # all coastal states next to Texas
+                coastal(x))))
+# ('LA',)
+
+print((run(5, x, coastal(y),           # five states that border a coastal state
+                adjacent(x, y))))
+# ('VT', 'AL', 'WV', 'DE', 'MA')
+
+print((run(0, x, adjacent('TN', x),    # all states adjacent to Tennessee
+                adjacent('FL', x))))    #        and adjacent to Florida
+# ('GA', 'AL')
+
+
+#user_classes
+from account import Account
+from kanren import unifiable, run, var, eq, membero, variables
+from kanren.core import lall
+from kanren.arith import add, gt, sub
+
+unifiable(Account)  # Register Account class
+
+accounts = (Account('Adam', 'Smith', 1, 20),
+            Account('Carl', 'Marx', 2, 3),
+            Account('John', 'Rockefeller', 3, 1000))
+
+# optional name strings are helpful for debugging
+first = var('first')
+last = var('last')
+ident = var('ident')
+balance = var('balance')
+newbalance = var('newbalance')
+
+# Describe a couple of transformations on accounts
+source = Account(first, last, ident, balance)
+target = Account(first, last, ident, newbalance)
+
+theorists = ('Adam', 'Carl')
+# Give $10 to theorists
+theorist_bonus = lall((membero, source, accounts),
+                      (membero, first, theorists),
+                      (add, 10, balance, newbalance))
+
+# Take $10 from anyone with more than $100
+tax_the_rich = lall((membero, source, accounts),
+                    (gt, balance, 100),
+                    (sub, balance, 10, newbalance))
+
+print("Take $10 from anyone with more than $100")
+print((run(0, target, tax_the_rich)))
+
+print("Give $10 to theorists")
+print((run(0, target, theorist_bonus)))
